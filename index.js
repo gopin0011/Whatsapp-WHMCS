@@ -1,12 +1,16 @@
-// Package yang di gunakan
+// node 18 cd node_modules/whatsapp-web.js/ npm install puppeteer@22.1.0
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-// express api
+// const fs = require('fs');
 const express = require('express');
-const app = express();
-const port = 8080;
+const qrcode = require('qrcode');
+const socketIO = require('socket.io');
+const http = require('http');
 
-// Membuat Client Baru
+// initial instance
+const PORT = process.env.PORT || 8081;
+const app = express();
+const server = http.createServer(app);
+const io = socketIO(server);
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
@@ -22,18 +26,93 @@ const client = new Client({
         ]},
 });
 
-//Proses Masuk whatsappjs menggunakan qrcode yang akan di kirim oleh whatsapp-web.js
-client.on('qr', (qr) => {
-    qrcode.generate(qr, {
-        small: true
-    });
+let today = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+};
+
+// index routing and middleware
+app.use(express.json());
+app.use(express.urlencoded({extended: true}));
+app.get('/qr', (req, res) => {
+  res.sendFile('status.html', {root: __dirname});
 });
 
-//Proses Dimana Whatsapp-web.js Siap digunakan
-client.on('ready', () => {
-    console.log('Ready !');
-    app.use(express.json());
-    app.use(express.urlencoded({extended: true}));
+// initialize whatsapp and the example event
+client.on('message', msg => {
+  if (msg.body == '!ping') {
+    msg.reply('pong');
+  } else if (msg.body == 'skuy') {
+    msg.reply('helo ma bradah');
+  }
+});
+client.initialize();
+
+// socket connection
+io.on('connection', (socket) => {
+  //var now = today.toLocaleString();
+  //var now = today();
+  socket.emit('message', `${today()} Connected`);
+
+  client.on('qr', (qr) => {
+    try {
+      qrcode.toDataURL(qr, (err, url) => {
+        if (err) {
+          // Handle the error
+          console.error("Error generating QR code:", err);
+          return;
+        }
+        socket.emit("qr", url);
+        socket.emit('message', `${today()} QR Code received`);
+      });
+    } catch (error) {
+      // Handle any synchronous errors that may occur within the try block
+      console.error("Error in QR event listener:", error);
+    }
+  });
+
+  client.on('ready', () => {
+    socket.emit('message', `${today()} WhatsApp is ready!`);
+  });
+
+  client.on('authenticated', (session) => {
+    socket.emit('message', `${today()} Whatsapp is authenticated!`);
+    // sessionCfg = session;
+    // fs.writeFile(SESSION_FILE_PATH, JSON.stringify(session), function(err) {
+    //   if (err) {
+    //     console.error(err);
+    //   }
+    // });
+  });
+
+  client.on('auth_failure', function(session) {
+    socket.emit('message', `${today()} Auth failure, restarting...`);
+  });
+
+  client.on('disconnected', function() {
+    socket.emit('message', `${today()} Disconnected`);
+    
+    client.destroy();
+    client.initialize();
+    // if (fs.existsSync(SESSION_FILE_PATH)) {
+    //   fs.unlinkSync(SESSION_FILE_PATH, function(err) {
+    //     if(err) return console.log(err);
+    //     console.log('Session file deleted!');
+    //   });
+    //   client.destroy();
+    //   client.initialize();
+    // }
+  });
+});
+
+    // send message routing
     app.post('/api/send', (req, res) => {
         // res.send('Hello World, from express');
         const phone = req.body.phone;
@@ -58,34 +137,17 @@ client.on('ready', () => {
             });
         });
     });
-    app.listen(port, () => console.log(`Hello world app listening on port ${port}!`))
+server.listen(PORT, () => {
+  console.log('App listen on port ', PORT);
 });
 
-// BOT Autorespon
-// define var
-var currentChatLocation;
-// Proses Dimana Ketika Pesan masuk ke bot
-client.on('message', async message => {
-    //Mengecek Pesan yang masuk sama dengan Menu jika benar balas dengan Haii!!
-    if (message.body.toLowerCase() === 'menu') {
-        // Membalas Pesan
-        currentChatLocation = 'menu';
-        message.reply('=== MENU UTAMA ===\n\nUntuk memilih menu, ketik angka yang tersedia dalam pilihan menu !\n1. Apa itu *Intprism* dan *Computing ID* ?\n2. Layanan apa saja yang disediakan?')
-    }
-    if (currentChatLocation == 'menu') {
-        if (message.body.toLocaleLowerCase() === '1'){
-            message.reply('*PT Intprism Computing Technology* memiliki beberapa brand yakni: *Intprism* dan *Computing ID*\n\n *Intprism* fokus memberikan layanan sistem informasi kepada kamu untuk membuat aplikasi berbasis web maupun mobile termasuk android dan IOS.\n\n*Computing ID* fokus memberikan layanan insfratruktur kepada kamu yang membutuhkan layanan terkait server dan sejenisnya antara lain: Hosting, Domain, Cloud Server, Colocation Server, Internet of Things dan Interconnection.\n\n\nPosisi kamu sekarang ada di: '+currentChatLocation+' ketik *Menu* untuk kembali ke menu utama');
-        }
-        if (message.body.toLocaleLowerCase() === '2'){
-            message.reply('Layanan yang kami berikan yakni:\n\n*Intprism*\n- Sistem informasi custom\n- Aplikasi berbasis\n- Aplikasi mobile android\n- Aplikasi mobile IOS.\n\n*Computing ID* \n- Hosting cPanel\n- Domain\n- Cloud Server\n- Colocation Server\n- Internet of Things\n- Interconnection.\n\n\nPosisi kamu sekarang ada di: '+currentChatLocation+' ketik *Menu* untuk kembali ke menu utama');
-        }
-        
-    }
-})
 
-//Proses Dimana klient disconnect dari Whatsapp-web
-client.on('disconnected', (reason) => {
-    console.log('disconnect Whatsapp-bot', reason);
-});
+// curl -d "phone=+6281394420922@c.us&message=value2" -X POST http://localhost:8000/api/send
+// { "phone": "+6282120017817", "message": "Halo dari API Flask!" }
+/* troubleshoot
+https://github.com/Eugeny/tabby/issues/9457
+https://askubuntu.com/questions/1527215/how-to-install-and-use-the-app-depends-on-libappindicator1-in-ubuntu-24-04
+installation 
+https://wwebjs.dev/guide/installation.html
+*/
 
-client.initialize();
